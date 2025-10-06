@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='UTF-8'>
+    <meta name='viewport' content='width=device-width,initial-scale=1.0'>
+    <title>Buddy AI Demo</title>
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box }
+        body { 
+            font-family:'Segoe UI',sans-serif;
+            background:linear-gradient(135deg,#667eea,#764ba2);
+            color:white; padding:20px; text-align:center; min-height:100vh 
+        }
+        h1 { font-size:2em; margin-bottom:20px; text-shadow:2px 2px 4px rgba(0,0,0,0.5) }
+        #audioCanvas { 
+            background:rgba(0,0,0,0.3); border-radius:10px; 
+            margin:20px auto; display:block; 
+            box-shadow:0 10px 30px rgba(0,0,0,0.3) 
+        }
+        .btn { 
+            background:linear-gradient(45deg,#ff6b6b,#ee5a52);
+            border:none; color:white; padding:15px 25px; font-size:16px;
+            border-radius:25px; cursor:pointer; margin:5px;
+            transition:all 0.3s; box-shadow:0 4px 15px rgba(0,0,0,0.2)
+        }
+        .btn:disabled { opacity:0.6; background:#666 }
+        .status { 
+            padding:15px; background:rgba(255,255,255,0.1);
+            border-radius:10px; margin:20px auto; max-width:600px
+        }
+        .mic-active { background:#4CAF50; box-shadow:0 0 10px #4CAF50 }
+        .mic-inactive { background:#f44336 }
+        .mic-status { 
+            display:inline-block; width:12px; height:12px;
+            border-radius:50%; margin-right:8px 
+        }
+    </style>
+</head>
+<body>
+    <h1>🤖 Meet Buddy - AI Learning Companion</h1>
+    <canvas id='audioCanvas' width='700' height='300'></canvas>
+    <div>
+        <button id='startBtn' class='btn'>🎤 Start Talking to Buddy</button>
+        <button id='stopBtn' class='btn' disabled>⏹️ Stop Session</button>
+    </div>
+    <div class='status'>
+        <span id='micStatus' class='mic-status mic-inactive'></span>
+        <span id='statusText'>Click Start to begin your conversation with Buddy!</span>
+    </div>
+
+    <script>
+        class BuddyDemo {
+            constructor() {
+                this.canvas = document.getElementById('audioCanvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.audioContext = null;
+                this.analyser = null;
+                this.dataArray = null;
+                this.animationId = null;
+                this.isRecording = false;
+                this.balls = [];
+                this.colors = ['#ff6b6b','#4ecdc4','#45b7d1','#96ceb4','#feca57'];
+                this.setupBalls();
+                this.setupEvents();
+            }
+
+            setupBalls() {
+                for(let i = 0; i < 5; i++) {
+                    this.balls.push({
+                        x: Math.random() * this.canvas.width,
+                        y: Math.random() * this.canvas.height,
+                        radius: 15,
+                        vx: (Math.random() - 0.5) * 2,
+                        vy: (Math.random() - 0.5) * 2,
+                        color: this.colors[i],
+                        audioLevel: 0
+                    });
+                }
+            }
+
+            setupEvents() {
+                document.getElementById('startBtn').onclick = () => this.start();
+                document.getElementById('stopBtn').onclick = () => this.stop();
+            }
+
+            async start() {
+                try {
+                    this.updateStatus('Requesting microphone access...', 'inactive');
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        audio: { echoCancellation: true, noiseSuppression: true }
+                    });
+                    
+                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    this.analyser = this.audioContext.createAnalyser();
+                    this.analyser.fftSize = 256;
+                    
+                    const source = this.audioContext.createMediaStreamSource(stream);
+                    source.connect(this.analyser);
+                    this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+                    
+                    this.isRecording = true;
+                    document.getElementById('startBtn').disabled = true;
+                    document.getElementById('stopBtn').disabled = false;
+                    
+                    this.updateStatus('🎉 Buddy is listening! Try saying: "Hi Buddy, let\'s do some maths!"', 'active');
+                    this.animate();
+                } catch(e) {
+                    console.error('Microphone error:', e);
+                    this.updateStatus('❌ Please allow microphone access and try again', 'inactive');
+                }
+            }
+
+            stop() {
+                this.isRecording = false;
+                if(this.audioContext) this.audioContext.close();
+                if(this.animationId) cancelAnimationFrame(this.animationId);
+                
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('stopBtn').disabled = true;
+                this.updateStatus('Session ended. Click Start to talk to Buddy again!', 'inactive');
+            }
+
+            updateStatus(text, status) {
+                document.getElementById('statusText').textContent = text;
+                document.getElementById('micStatus').className = 'mic-status mic-' + status;
+            }
+
+            animate() {
+                if(!this.isRecording) return;
+                this.animationId = requestAnimationFrame(() => this.animate());
+                
+                this.analyser.getByteFrequencyData(this.dataArray);
+                const avg = this.dataArray.reduce((sum, val) => sum + val, 0) / this.dataArray.length;
+                
+                this.ctx.fillStyle = 'rgba(102,126,234,0.15)';
+                this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+                
+                this.balls.forEach(ball => {
+                    ball.audioLevel = avg / 255;
+                    const size = ball.radius + (ball.audioLevel * 25);
+                    
+                    ball.x += ball.vx * (1 + ball.audioLevel);
+                    ball.y += ball.vy * (1 + ball.audioLevel);
+                    
+                    if(ball.x <= size || ball.x >= this.canvas.width - size) ball.vx *= -1;
+                    if(ball.y <= size || ball.y >= this.canvas.height - size) ball.vy *= -1;
+                    
+                    ball.x = Math.max(size, Math.min(this.canvas.width - size, ball.x));
+                    ball.y = Math.max(size, Math.min(this.canvas.height - size, ball.y));
+                    
+                    this.ctx.beginPath();
+                    this.ctx.fillStyle = ball.color;
+                    this.ctx.arc(ball.x, ball.y, size, 0, Math.PI * 2);
+                    this.ctx.fill();
+                    this.ctx.shadowColor = ball.color;
+                    this.ctx.shadowBlur = 15;
+                    this.ctx.fill();
+                    this.ctx.shadowBlur = 0;
+                });
+            }
+        }
+
+        new BuddyDemo();
+    </script>
+</body>
+</html>
